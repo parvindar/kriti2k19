@@ -215,6 +215,7 @@ public class RegisterActivity extends AppCompatActivity {
                 user.put("Email", email);
                 user.put("Username", username);
                 user.put("Password", password);
+                user.put("Department","any");
                 user.put("UserType","user");
                 user.put("Name_insensitive",name.toLowerCase());
                 user.put("Username_insensitive",username.toLowerCase());

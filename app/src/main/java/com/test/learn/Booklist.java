@@ -28,8 +28,11 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.tasks.Continuation;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
@@ -75,7 +78,7 @@ public class Booklist extends AppCompatActivity {
                 ArrayList<Book> bookArrayList = new ArrayList<>();
                 for(DocumentSnapshot documentSnapshot : queryDocumentSnapshots)
                 {
-                    Book book=new Book(documentSnapshot.get("name").toString(),documentSnapshot.get("author").toString(),documentSnapshot.get("tag").toString(),documentSnapshot.get("rating").toString(),documentSnapshot.get("url").toString());
+                    Book book=new Book(documentSnapshot.get("name").toString(),documentSnapshot.get("author").toString(),documentSnapshot.get("tag").toString(),documentSnapshot.get("rating").toString(),documentSnapshot.get("url").toString(),documentSnapshot.get("id").toString());
                     bookArrayList.add(book);
                 }
 
@@ -141,7 +144,7 @@ public class Booklist extends AppCompatActivity {
                         }
 
                         if(pdfUri!=null)
-                        uploadFile(pdfUri,bookname.getText().toString(),author.getText().toString(),tag.getText().toString());
+                        uploadFile(pdfUri,bookname.getText().toString() +".pdf",author.getText().toString(),tag.getText().toString());
                         else
                             Toast.makeText(Booklist.this,"Please select a file",Toast.LENGTH_LONG).show();
                     }
@@ -157,43 +160,55 @@ public class Booklist extends AppCompatActivity {
 
     }
 
-    void uploadFile(final Uri pdfUri, final String name, final String author, final String tag)
-    {
+    void uploadFile(final Uri pdfUri, final String name, final String author, final String tag) {
         progressDialog = new ProgressDialog(this);
         progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         progressDialog.setTitle("Uploading file...");
         progressDialog.setProgress(0);
         progressDialog.show();
 
-        String fileid = System.currentTimeMillis()+"";
-        StorageReference storageReference = storage.getReference();
-        storageReference.child("books").child(club).child(fileid).putFile(pdfUri).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+        final String fileid = System.currentTimeMillis() + "";
+        final StorageReference storageReference = storage.getReference().child("books").child(club).child(fileid);
+        storageReference.putFile(pdfUri).continueWithTask(new Continuation<UploadTask.TaskSnapshot, Task<Uri>>() {
             @Override
-            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+            public Task<Uri> then(@NonNull Task<UploadTask.TaskSnapshot> task) throws Exception {
+                if (!task.isSuccessful()) {
+                    throw task.getException();
+                }
 
-                String url = taskSnapshot.getMetadata().getReference().getDownloadUrl().toString();
-                Map<String,Object> book = new HashMap<>();
-                book.put("url",url);
-                book.put("name",name);
-                book.put("author",author);
-                book.put("tag",tag);
-                book.put("rating",0);
-                book.put("n",0);
-                db.collection("Books").document("Category").collection(club).document(tag+name+author).set(book);
+                int currentprogress = (int)(100*(task.getResult().getBytesTransferred()/task.getResult().getTotalByteCount()));
+                progressDialog.setProgress(currentprogress);
+                Log.d("DEBUG","progress  -->  "+currentprogress);
 
+                // Continue with the task to get the download URL
+                return storageReference.getDownloadUrl();
+            }
+        }).addOnCompleteListener(new OnCompleteListener<Uri>() {
+            @Override
+            public void onComplete(@NonNull Task<Uri> task) {
+                if (task.isSuccessful()) {
+                    Uri downloadUri = task.getResult();
+                    String url = downloadUri.toString();
+
+                    Map<String, Object> book = new HashMap<>();
+                    book.put("url", url);
+                    book.put("name", name);
+                    book.put("author", author);
+                    book.put("tag", tag);
+                    book.put("rating", 0);
+                    book.put("id",fileid);
+                    book.put("n", 0);
+                    db.collection("Books").document("Category").collection(club).document(fileid).set(book);
+
+                } else {
+                    // Handle failures
+                    // ...
+                }
             }
         }).addOnFailureListener(new OnFailureListener() {
             @Override
             public void onFailure(@NonNull Exception e) {
-                Toast.makeText(Booklist.this,"File did not uploaded",Toast.LENGTH_LONG).show();
-            }
-        }).addOnProgressListener(new OnProgressListener<UploadTask.TaskSnapshot>() {
-            @Override
-            public void onProgress(UploadTask.TaskSnapshot taskSnapshot) {
-
-                int currentprogress = (int)(100*(taskSnapshot.getBytesTransferred()/taskSnapshot.getTotalByteCount()));
-                progressDialog.setProgress(currentprogress);
-                Log.d("DEBUG","progress  -->  "+currentprogress);
+                Toast.makeText(Booklist.this, "File did not uploaded", Toast.LENGTH_LONG).show();
             }
         });
     }
@@ -224,7 +239,7 @@ public class Booklist extends AppCompatActivity {
         if(requestCode==86&&resultCode==RESULT_OK && data!=null)
         {
             pdfUri = data.getData();
-            selectedbookname.setText(data.getData().getLastPathSegment());
+            selectedbookname.setText(data.getData().getPath());
         }
         else
         {
@@ -239,18 +254,20 @@ public class Booklist extends AppCompatActivity {
         String tag;
         String rating;
         String url;
+        String id;
 
         Book()
         {
 
         }
 
-        public Book(String name, String author, String tag, String rating,String url) {
+        public Book(String name, String author, String tag, String rating,String url,String id) {
             this.name = name;
             this.author = author;
             this.tag = tag;
             this.rating = rating;
             this.url = url;
+            this.id = id;
         }
     }
 
@@ -290,7 +307,14 @@ public class Booklist extends AppCompatActivity {
                     public void onClick(View v) {
                         if(getItem(position)!=null)
                         {
-
+                            Intent intent = new Intent(Booklist.this,PdfViewer.class);
+                            intent.putExtra("name",getItem(position).name);
+                            intent.putExtra("author",getItem(position).author);
+                            intent.putExtra("rating",getItem(position).rating);
+                            intent.putExtra("url",getItem(position).url);
+                            intent.putExtra("id",getItem(position).id);
+                            intent.putExtra("club",club);
+                            startActivity(intent);
 
                         }
 
